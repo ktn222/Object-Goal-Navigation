@@ -13,6 +13,41 @@ from constants import coco_categories
 import envs.utils.pose as pu
 
 
+import os
+import uuid
+import random
+from typing import List
+import cv2
+from gym_unity.envs import UnityToGymWrapper
+from mlagents_envs.side_channel.side_channel import SideChannel, IncomingMessage, OutgoingMessage
+from mlagents_envs.environment import UnityEnvironment
+from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
+from dpt_depth import DPTDepth
+
+DIM_GOAL = 3
+DIM_ACTION = 2
+BITS = 2
+visibility_constant = 1
+
+class PosChannel(SideChannel):
+    def __init__(self) -> None:
+        super().__init__(uuid.UUID("621f0a70-4f87-11ea-a6bf-784f4387d1f7"))
+
+    def on_message_received(self, msg: IncomingMessage) -> None:
+        """
+        Note: We must implement this method of the SideChannel interface to
+        receive messages from Unity
+        """
+        self.goal_depthfromwater = msg.read_float32_list()
+
+    def goal_depthfromwater_info(self):
+        return self.goal_depthfromwater
+
+    def assign_testpos_visibility(self, data: List[float]) -> None:
+        msg = OutgoingMessage()
+        msg.write_float32_list(data)
+        super().queue_message_to_send(msg)
+
 class ObjectGoal_Env(habitat.RLEnv):
     """The Object Goal Navigation environment class. The class is responsible
     for loading the dataset, generating episodes, and computing evaluation
@@ -74,6 +109,22 @@ class ObjectGoal_Env(habitat.RLEnv):
         self.info['distance_to_goal'] = None
         self.info['spl'] = None
         self.info['success'] = None
+
+        # Unity scene
+        config_channel = EngineConfigurationChannel()
+        self.pos_info = PosChannel()
+        unity_env = UnityEnvironment(
+            os.path.abspath("./") + "/underwater_env/water",
+            side_channels=[config_channel, self.pos_info],
+            worker_id=rank,
+            base_port=5004
+        )
+        config_channel.set_configuration_parameters(time_scale=10, capture_frame_rate=100)
+        self.unity_env = UnityToGymWrapper(unity_env, allow_multiple_obs=True)
+        model_path = os.path.abspath("./") + "/DPT/weights/"
+        model_file = "dpt_large-midas-2f21e586.pt"
+        model_type = "dpt_large"
+        self.dpt = DPTDepth("cuda:0", model_type=model_type, model_path=model_path + model_file)
 
     def load_new_episode(self):
         """The function loads a fixed episode from the episode dataset. This
@@ -294,7 +345,6 @@ class ObjectGoal_Env(habitat.RLEnv):
         x, y, o = sim_loc
         min_x, min_y = self.map_obj_origin / 100.0
         x, y = int((-x - min_x) * 20.), int((-y - min_y) * 20.)
-
         o = np.rad2deg(o) + 180.0
         return y, x, o
 
@@ -306,6 +356,16 @@ class ObjectGoal_Env(habitat.RLEnv):
             info (dict): contains timestep, pose, goal category and
                          evaluation metric info
         """
+        # unity
+        self.unity_env.reset()
+        obs_img_ray, _, _, _ = self.unity_env.step([0, 0])
+        obs_predicted_depth = self.dpt.run(obs_img_ray[0] ** 0.45)
+        obs_img_ray[0] = cv2.resize(obs_img_ray[0], (640, 480), interpolation=cv2.INTER_NEAREST)
+        obs_img_ray[0] = (obs_img_ray[0] * 255).astype(np.uint8)
+        obs_predicted_depth = cv2.resize(obs_predicted_depth, (640, 480), interpolation=cv2.INTER_NEAREST)
+        obs_predicted_depth = obs_predicted_depth[:, :, np.newaxis]
+        obs_predicted_depth = (obs_predicted_depth * 1.).astype(np.uint8)
+
         args = self.args
         new_scene = self.episode_no % args.num_train_episodes == 0
 
@@ -329,8 +389,11 @@ class ObjectGoal_Env(habitat.RLEnv):
         else:
             obs = self.generate_new_episode()
 
-        rgb = obs['rgb'].astype(np.uint8)
-        depth = obs['depth']
+        # rgb = obs['rgb'].astype(np.uint8)
+        # depth = obs['depth']
+        rgb = obs_img_ray[0].astype(np.uint8)
+        depth = obs_predicted_depth
+
         state = np.concatenate((rgb, depth), axis=2).transpose(2, 0, 1)
         self.last_sim_location = self.get_sim_location()
 
@@ -357,6 +420,15 @@ class ObjectGoal_Env(habitat.RLEnv):
             info (dict): contains timestep, pose, goal category and
                          evaluation metric info
         """
+        # unity
+        obs_img_ray, _, _, _ = self.unity_env.step([0, 0])
+        obs_predicted_depth = self.dpt.run(obs_img_ray[0] ** 0.45)
+        obs_img_ray[0] = cv2.resize(obs_img_ray[0], (640, 480), interpolation=cv2.INTER_NEAREST)
+        obs_img_ray[0] = (obs_img_ray[0] * 255).astype(np.uint8)
+        obs_predicted_depth = cv2.resize(obs_predicted_depth, (640, 480), interpolation=cv2.INTER_NEAREST)
+        obs_predicted_depth = obs_predicted_depth[:, :, np.newaxis]
+        obs_predicted_depth = (obs_predicted_depth * 1.).astype(np.uint8)
+
         action = action["action"]
         if action == 0:
             self.stopped = True
@@ -370,15 +442,18 @@ class ObjectGoal_Env(habitat.RLEnv):
         self.info['sensor_pose'] = [dx, dy, do]
         self.path_length += pu.get_l2_distance(0, dx, 0, dy)
 
-        spl, success, dist = 0., 0., 0.
         if done:
             spl, success, dist = self.get_metrics()
             self.info['distance_to_goal'] = dist
             self.info['spl'] = spl
             self.info['success'] = success
 
-        rgb = obs['rgb'].astype(np.uint8)
-        depth = obs['depth']
+        
+        # rgb = obs['rgb'].astype(np.uint8)
+        # depth = obs['depth']
+        rgb = obs_img_ray[0].astype(np.uint8)
+        depth = obs_predicted_depth
+
         state = np.concatenate((rgb, depth), axis=2).transpose(2, 0, 1)
 
         self.timestep += 1
