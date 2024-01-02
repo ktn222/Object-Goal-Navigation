@@ -1,4 +1,4 @@
-# Object Goal Navigation using Goal-Oriented Semantic Exploration
+# Object Goal Navigation using Goal-Oriented Semantic Exploration with Unity
 This is a PyTorch implementation of the NeurIPS-20 paper:
 
 [Object Goal Navigation using Goal-Oriented Semantic Exploration](https://arxiv.org/pdf/2007.00643.pdf)<br />
@@ -9,7 +9,7 @@ Winner of the [CVPR 2020 Habitat ObjectNav Challenge](https://aihabitat.org/chal
 
 Project Website: https://devendrachaplot.github.io/projects/semantic-exploration
 
-![example](./docs/example.gif)
+![example](./docs/unity.gif)
 
 ### Overview:
 The Goal-Oriented Semantic Exploration (SemExp) model consists of three modules: a Semantic Mapping Module, a Goal-Oriented Semantic Policy, and a deterministic Local Policy. 
@@ -17,6 +17,11 @@ As shown below, the Semantic Mapping model builds a semantic map over time. The 
 map to reach the given object goal efficiently. A deterministic local policy based on analytical planners is used to take low-level navigation actions to reach the long-term goal.
 
 ![overview](./docs/overview.jpg)
+
+### UNITY EXTENSION
+
+- Download required modules for [Unity Simulator](https://drive.google.com/drive/folders/19fD-CglHxv_JBsiu8jOCmEcceL3ujtIL?usp=sharing) and [DPT model](https://drive.google.com/drive/folders/1eTW-lfLJ26evtKFu95ARGUvfS1b_KKrP?usp=drive_link)
+- Run the test script as normal
 
 ### This repository contains:
 - Episode train and test datasets for [Object Goal Navigation](https://arxiv.org/pdf/2007.00643.pdf) task for the Gibson dataset in the Habitat Simulator.
